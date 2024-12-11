@@ -1,0 +1,524 @@
+---
+title: "HTN"
+author: "Raghad"
+date: "2024-12-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages('BiocManager')
+```
+
+##Installing and loading packages
+```{r}
+pacman::p_load(haven, tidyverse, naniar, VIM, mice, lattice, table1, stringr, readxl, purrr, forcats, janitor, broom, sandwich, knitr, readr, writexl, table1, DiagrammeR, rsvg, dplyr, car,odds.n.ends, blorr, lmtest, jtools, mass, dagitty)
+```
+##Loading main datasets and merging a variable
+```{r}
+htn_data <- read_excel("HtnPollData_complete.xlsx", sheet=1) 
+
+baseline <- read_excel ("htn_drecode.xlsx", sheet=1)
+
+
+```
+
+```{r}
+# Merge with specific baseline variable (the getinfo_bl variable) and match by panel ID (ExternalReference)
+
+Htn_new <- merge(htn_data, 
+                 baseline[, c("ExternalReference", "getinfo_bl")], 
+                 by = "ExternalReference", 
+                 all.x = TRUE)
+
+
+```
+ 
+# Data Management 
+
+```{r}
+# Check for duplicates in htn_data
+sum(duplicated(htn_data$ExternalReference))
+
+# Check for duplicates in baseline
+sum(duplicated(baseline$ExternalReference))
+
+```
+```{r}
+# Identify the duplicated entry in htn_data
+htn_data[duplicated(htn_data$ExternalReference), ]
+
+```
+```{r}
+# Identify the duplicated entry in baseline
+baseline[duplicated(baseline$ExternalReference), ]
+```
+```{r}
+# Removing duplicates 
+
+htn_data <- htn_data[!duplicated(htn_data$ExternalReference), ]
+baseline <- baseline[!duplicated(baseline$ExternalReference), ]
+
+```
+
+```{r}
+# Repeating the merge
+Htn_new <- merge(htn_data, 
+                 baseline[, c("ExternalReference", "getinfo_bl")], 
+                 by = "ExternalReference", 
+                 all.x = TRUE)
+```
+
+
+
+```{r}
+
+# Creating a new variable bp_numb based on the values in HTNPoll5a_1 and HTNPoll5a_2 for people who got both systolic and diastolic values correct vs incorrect and factoring it. 
+
+Htn_new <- Htn_new %>%
+  mutate(bp_numb = case_when(
+    HTNPoll5a_1 == 120 & HTNPoll5a_2 == 80 ~ 1,  # Code as 1 if both are correct
+    TRUE ~ 0                                    # Code as 0 for any other values
+  ),
+ bp_numb = factor(bp_numb, levels=c(0:1), labels=c("Incorrect", "Correct"))) # make it a factor variable
+
+# checking to make sure re-categorization worked as expected
+table(Htn_new$bp_numb, useNA="always")
+
+```
+```{r}
+# Count the frequency of each category in gender_bl
+table(Htn_new$gender_bl)
+
+
+```
+
+```{r}
+
+
+# Recode gender_bl into a new variable gender
+Htn_new <- Htn_new %>%
+  mutate(gender = case_when(
+    gender_bl == "Female" ~ 1,           # Female becomes 1
+    gender_bl == "Male" ~ 0,             # Male becomes 0
+    TRUE ~ NA_real_                      # Other categories become NA
+  ),
+   gender = factor(gender, levels=c(0:1), labels=c("Male", "Female"))) # make it a factor variable
+
+
+```
+
+```{r}
+# Check the summary of the new gender variable
+summary(Htn_new$gender)
+
+# Check the frequency of the new gender variable
+table(Htn_new$gender)
+```
+```{r}
+# Count the frequency of each category in age_cat_baseline variable
+table(Htn_new$age_cat_baseline)
+```
+```{r}
+# Check unique values in the age_cat_baseline column
+unique(Htn_new$age_cat_baseline)
+
+```
+
+```{r}
+# Recode age categories into 0 for younger adults (18-49) and 1 for older adults (>=50)
+Htn_new <- Htn_new %>%
+  mutate(age = case_when(
+    age_cat_baseline %in% c("18-29", "30-39", "40-49") ~ 0,  # Younger adults (18-49) as 0
+    age_cat_baseline %in% c("50-59", ">=60") ~ 1,  # Older adults (>=50) as 1
+    age_cat_baseline == "Missing birthdate" ~ NA_real_,  # Handle Missing birthdate
+    is.na(age_cat_baseline) ~ NA_real_,  # Explicitly handle any NA values
+    TRUE ~ NA_real_  # Any other unexpected values are also assigned NA
+  ),
+  age = factor(age, levels=c(0:1), labels=c("Younger adults", "Older adults")))  # Make it a factor variable
+
+
+
+
+```
+
+```{r}
+table(Htn_new$age)
+summary(Htn_new$age)
+```
+```{r}
+table(Htn_new$race_cat)
+```
+
+```{r}
+
+
+# Recoding race_cat into a new variable race and factorizing it
+Htn_new <- Htn_new %>%
+  mutate(race = case_when(
+    race_cat == "Black or African American" ~ 0,  # Code Black or African American as 0
+    race_cat == "White" ~ 1,                      # Code White as 1
+    race_cat == "Other race" ~ 2,                 # Code Other race as 2
+    TRUE ~ NA_real_                               # Assign NA for any missing or unexpected categories
+  )) %>%
+  mutate(race = factor(race, levels = c(0, 1, 2), labels = c("Black or African American", "White", "Other race")))  # Make it a factor variable with labels
+
+```
+
+```{r}
+# Checking categorization
+table(Htn_new$race)
+```
+
+```{r}
+table(Htn_new$getinfo_bl)
+```
+
+```{r}
+# Create a new variable health_source based on getinfo_bl
+Htn_new <- Htn_new %>%
+  mutate(health_source = case_when(
+    getinfo_bl %in% c("Cable TV", "Local TV", "Network TV", 
+                      "News website or app", "Other (Reliable)", 
+                      "Print", "Radio") ~ "Reliable",  # Reliable sources
+    getinfo_bl %in% c("Social media", "Someone you know", 
+                      "Other (Unreliable)") ~ "Unreliable",  # Unreliable sources
+    TRUE ~ NA_character_  # Assign NA for any other or missing values
+  ))
+
+```
+
+
+```{r}
+# Create and code health_source as 1 (Reliable) and 0 (Unreliable), then factor it in brain_1
+Htn_new <- Htn_new %>%
+  mutate(health_source = case_when(
+    getinfo_bl %in% c("Cable TV", "Local TV", "Network TV", 
+                      "News website or app", "Other (Reliable)", 
+                      "Print", "Radio") ~ 1,  # Reliable sources as 1
+    getinfo_bl %in% c("Social media", "Someone you know", 
+                      "Other (Unreliable)") ~ 0,  # Unreliable sources as 0
+    TRUE ~ NA_real_  # Assign NA for any other or missing values
+  ),
+  health_source = factor(health_source, levels = c(0, 1), 
+                         labels = c("Unreliable", "Reliable"))) # Factor the variable
+
+```
+
+```{r}
+# Checking if recoding happened correctly. 
+
+table(Htn_new$health_source)
+```
+```{r}
+# Subsetting the dataset to include only the specified variables
+Htn_new_1 <- Htn_new[, c("ExternalReference", "site", "age", "bp_numb", "gender", "race", "health_source")]
+
+# Viewing the first few rows of the new dataset to confirm
+head(Htn_new_1)
+
+```
+```{r}
+# Check for missing values in the new subsetted dataset
+sum(is.na(Htn_new_1))
+```
+```{r}
+Htn_cleaned <- na.omit(Htn_new_1)
+```
+
+```{r}
+# Check for missing values in the cleaned dataset
+sum(is.na(Htn_cleaned))
+```
+# Creating the Flow Chart 
+
+```{r}
+# Create the flowchart
+DiagrammeR::grViz("
+digraph flowchart {
+  graph [layout = dot, rankdir = TB]
+  
+  # Define nodes
+  node [shape = oval, style = filled, fillcolor = red]
+  start [label = 'Polling Data\\Hypertension']
+  final [label = 'Final Cleaned Dataset\\Hypertension']
+  
+  node [shape = rectangle, style = filled, fillcolor = lightyellow]
+  read_data [label = 'Initial Data\n23 variables\n540 Observations']
+  remove_obs [label = 'Removing Duplicate Observations:\\n23 Variables\n539 Observations']
+  adding_vars [label = 'Recoding new variables:\\n27 Variables\n539 Observations']
+  subset_data [label= 'Selecting wanted variables:\\n7 variables\n539 Observations']
+  remove_missing [label = 'Remove Missing Data:\\n7 Variables\n532 Observations']
+  
+  # Connect nodes
+  start -> read_data -> remove_obs -> adding_vars -> subset_data -> remove_missing -> final
+}
+")
+
+
+```
+
+
+```{r}
+# Create the flowchart and assign it to 'figure1'
+figure1 <- grViz("
+digraph flowchart {
+  graph [layout = dot, rankdir = TB]
+  
+  # Define nodes
+  node [shape = oval, style = filled, fillcolor = red]
+  start [label = 'Polling Data\\Hypertension']
+  final [label = 'Final Cleaned Dataset\\Hypertension']
+  
+  node [shape = rectangle, style = filled, fillcolor = lightyellow]
+  read_data [label = 'Initial Data\n23 variables\n540 Observations']
+  remove_obs [label = 'Removing Duplicate Observations:\\n23 Variables\n539 Observations']
+  adding_vars [label = 'Recoding new variables:\\n27 Variables\n539 Observations']
+  subset_data [label= 'Selecting wanted variables:\\n7 variables\n539 Observations']
+  remove_missing [label = 'Remove Missing Data:\\n7 Variables\n532 Observations']
+  
+  # Connect nodes
+  start -> read_data -> remove_obs -> adding_vars -> subset_data -> remove_missing -> final
+}
+")
+
+# Export as PDF
+figure1 %>%
+  DiagrammeRsvg::export_svg() %>% 
+  charToRaw() %>% 
+  rsvg::rsvg_pdf("Figure_1.pdf")
+
+
+
+```
+
+# Creating a Dag 
+
+```{r}
+install.packages("dagitty")
+library(dagitty)
+```
+
+```{r}
+# Load the dagitty package
+library(dagitty)
+
+# Define the DAG structure
+dag <- dagitty('dag {
+  "Age" -> "Source of Health Information"
+  "Age" -> "Normal Blood Pressure Knowledge"
+  "Gender" -> "Source of Health Information"
+  "Gender" -> "Normal Blood Pressure Knowledge"
+  "Race" -> "Source of Health Information"
+  "Race" -> "Normal Blood Pressure Knowledge"
+  "Source of Health Information" -> "Normal Blood Pressure Knowledge"
+}')
+
+# Plot the DAG
+plot(dag)
+
+# Save as PNG
+png("dag_plot.png")
+plot(dag)
+dev.off()
+
+```
+## Age: Older individuals might have greater health awareness due to more frequent interactions with healthcare systems or personal experiences with chronic conditions, like high blood pressure.Different age groups may prefer different sources of health information. For example, younger individuals might rely more on social media, while older individuals might consult healthcare providers or traditional media.
+
+## Gender: Men and women often differ in how they seek health information. For instance, women are more likely to use healthcare services and consult medical professionals, which could influence their health knowledge.Studies have shown that health literacy and awareness of conditions like hypertension vary by gender. Women, for instance, may have higher awareness due to their engagement in family health management roles.
+
+## Race: Racial disparities in health education and healthcare access can influence knowledge about conditions such as normal blood pressure levels. Minority groups often face barriers to accessing reliable health information, which can impact their understanding of health topics.Cultural and socioeconomic factors linked to race can influence access to reliable health information, trust in healthcare systems, or reliance on community sources.
+
+## Therefore, by statistically controlling for age, gender, and race (e.g., using logistic regression), you isolate the effect of the source of health information on knowledge of blood pressure, reducing the risk of bias in your findings.
+## Without adjusting for age, gender, and race, we might observe an apparent relationship between the source of health information and knowledge of blood pressure that is actually due to differences in these demographic variables. For example:If younger participants rely heavily on social media (an unreliable source) and also have lower knowledge of blood pressure, age could confound the relationship between the health information source and knowledge.
+
+# Creating Table 1
+
+```{r}
+table1(~ gender+race+age+health_source+bp_numb,data = Htn_cleaned)
+```
+```{r}
+# Create a data frame with the structure of your table
+summary_table <- data.frame(
+  Variable = c("gender", "Male", "Female", 
+               "race", "Black or African American", "White", "Other race", 
+               "age", "Younger adults", "Older adults", 
+               "health_source", "Unreliable", "Reliable", 
+               "bp_numb", "Incorrect", "Correct"),
+  Level = c("", "192 (36.1%)", "340 (63.9%)", 
+            "", "162 (30.5%)", "269 (50.6%)", "101 (19.0%)", 
+            "", "384 (72.2%)", "148 (27.8%)", 
+            "", "221 (41.5%)", "311 (58.5%)", 
+            "", "416 (78.2%)", "116 (21.8%)")
+)
+
+# View the data frame
+print(summary_table)
+
+```
+```{r}
+write.csv(summary_table, "summary_table.csv", row.names = FALSE)
+
+```
+
+
+## Stratifying table 2 by Health information source
+```{r}
+table1(~ gender+race+age+bp_numb|health_source,data = Htn_cleaned)
+```
+```{r}
+# Table 3 is stratifying table 1 by the knowledge of normal blood pressure values - those who got it correct vs incorrect -
+
+table1(~ gender+race+age|bp_numb,data = Htn_cleaned)
+```
+
+
+
+# Logistic Regression Model
+
+```{r}
+# This first model will examine the relationship between the source of health information (health_source) and knowledge of normal blood pressure (bp_numb), without adjusting for demographics.
+
+# The first logistic regression model with just the independent and dependent variables
+model1 <- glm(bp_numb ~ health_source, 
+              data = Htn_cleaned, 
+              family = binomial())
+
+# View the summary of the first model
+summary(model1)
+
+# Interpretation: The model indicates a positive association between having a reliable source of health information and correctly identifying normal blood pressure values, but this association is not statistically significant (p = 0.188). Therefore, we cannot conclude that a reliable health source is strongly linked to better knowledge of blood pressure values based on this model. The relatively small change in deviance (1.76) suggests that adding health_source to the model does not significantly improve the fit. 
+
+```
+```{r}
+exp(model1$coefficients) # get ORs and CIs
+exp(confint(model1))
+
+```
+## Interpretation: 
+## health_sourceReliable (OR = 1.331): This represents the odds ratio comparing individuals who have a reliable source of health information to those with an unreliable source. An OR of 1.331 indicates that individuals with reliable sources are about 33% more likely to have correct blood pressure knowledge than those with unreliable sources. However, The 95% CI for the OR of health_sourceReliable ranges from 0.873 to 2.049. Since the CI includes 1, this means the effect is not statistically significant at the 0.05 level. There is not enough evidence to conclude that having a reliable source of health information is associated with a significant increase in the odds of having correct blood pressure knowledge.
+## In summary: Individuals with reliable sources of health information may have better odds of knowing correct blood pressure values (OR = 1.331), but this relationship is not statistically significant due to the confidence interval including 1.
+
+
+```{r}
+# Second model: Logistic regression with the independent and dependent variable + demographics
+model2 <- glm(bp_numb ~ health_source + age + gender + race, data = Htn_cleaned, family = binomial())
+
+# View the summary of the second model
+summary(model2)
+
+
+```
+## Older adults have almost the same odds of having correct knowledge as younger adults. This variable is not statistically significant (p = 0.925).
+## Females have nearly double the odds (1.99 times) of having correct knowledge compared to males. This is statistically significant (p = 0.004).
+## White individuals have 1.81 times the odds of having correct knowledge compared to Black or African American individuals. This is statistically significant (p = 0.022).
+## Individuals from "Other race" categories have 1.41 times the odds of having correct knowledge compared to Black or African American individuals. However, this effect is not statistically significant (p = 0.304).
+## Referring to the Deviance, including the predictors improved the model fit compared to the null model (model with no predictors).
+
+
+
+```{r}
+# Calculate the odds ratios for the coefficients in the second model
+exp(model2$coefficients) # get ORs and CIs
+exp(confint(model2))
+
+```
+## Females have almost double the odds of having correct knowledge compared to males. This effect was statistically significant (p = 0.004).
+## White individuals have 1.81 times the odds of having correct knowledge compared to Black or African American individuals. This was statistically significant (p = 0.022).
+
+
+```{r}
+# Likelihood ratio test to compare the models
+library(lmtest)
+lrt_result <- lrtest(model1, model2)
+
+# Print results of the likelihood ratio test
+print(lrt_result)
+```
+## The addition of demographic variables (age, gender, race) significantly improves the model's ability to predict knowledge of normal blood pressure
+## Model 2 fits the data significantly better than Model 1, indicating that the demographic variables add valuable explanatory power beyond just health_source.
+## Since p=0.006, the more complex model (Model 2) is preferred over the simpler one.
+
+```{r}
+
+
+# Extract coefficients, odds ratios, and confidence intervals for Model 2
+model2_results <- tidy(model2, exponentiate = TRUE, conf.int = TRUE) %>%
+  select(term, estimate, conf.low, conf.high) %>%
+  rename(
+    Variable = term,
+    Odds_Ratio = estimate,
+    `CI Lower Bound` = conf.low,
+    `CI Upper Bound` = conf.high
+  )
+
+# View the results
+print(model2_results)
+
+
+
+```
+```{r}
+# Export table to a CSV file
+write.csv(model2_results, "model2_results.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Run the VIF function on your logistic regression model (model2) to check for Multicollinearity 
+vif(model2)
+```
+## Interpretation: The GVIF suggests that there is no significant multicollinearity in the model. The factors are not highly correlated with each other. 
+
+```{r}
+# Creating a data frame for the GVIF results
+gvif_results <- data.frame(
+  Variable = c("health_source", "age", "gender", "race"),
+  GVIF = c(1.036813, 1.062830, 1.011058, 1.036145),
+  Df = c(1, 1, 1, 2),
+  GVIF_Std = c(1.018240, 1.030936, 1.005514, 1.008916)
+)
+
+# Exporting the results to a CSV file
+write.csv(gvif_results, "gvif_results.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+# Creating a data frame for the likelihood ratio test results
+lrt_results <- data.frame(
+  Model = c("Model 1", "Model 2"),
+  Df = c(2, 6),
+  LogLik = c(-278.11, -270.90),
+  Chisq = c(NA, 14.433),  # Chisq is only reported for Model 2
+  P_Value = c(NA, 0.006033)
+)
+
+# View the results
+print(lrt_results)
+
+# Export the results to a CSV file
+write.csv(lrt_results, "lrt_results.csv", row.names = FALSE)
+
+```
+```{r}
+# Creating a data frame for the coefficients and confidence intervals from Model 1
+model1_results <- data.frame(
+  Variable = c("(Intercept)", "health_sourceReliable"),
+  Coefficient = c(0.2346369, 1.3307213),
+  CI_Lower = c(0.1655704, 0.8732127),
+  CI_Upper = c(0.324818, 2.048631)
+)
+
+# View the results
+print(model1_results)
+
+# Export the results to a CSV file
+write.csv(model1_results, "model1_results.csv", row.names = FALSE)
+
+```
+
