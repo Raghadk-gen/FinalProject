@@ -15,7 +15,7 @@ install.packages('BiocManager')
 
 ##Installing and loading packages
 ```{r}
-pacman::p_load(haven, tidyverse, naniar, VIM, mice, lattice, table1, stringr, readxl, purrr, forcats, janitor, broom, sandwich, knitr, readr, writexl, table1, DiagrammeR, rsvg, dplyr, car,odds.n.ends, blorr, lmtest, jtools, mass, dagitty)
+pacman::p_load(haven, tidyverse, naniar, VIM, mice, lattice, table1, stringr, readxl, purrr, forcats, janitor, broom, sandwich, knitr, readr, writexl, table1, DiagrammeR, rsvg, dplyr, car,odds.n.ends, blorr, lmtest, jtools, mass, dagitty, gridExtra)
 ```
 ##Loading main datasets and merging a variable
 ```{r}
@@ -402,6 +402,27 @@ exp(confint(model1))
 ## health_sourceReliable (OR = 1.331): This represents the odds ratio comparing individuals who have a reliable source of health information to those with an unreliable source. An OR of 1.331 indicates that individuals with reliable sources are about 33% more likely to have correct blood pressure knowledge than those with unreliable sources. However, The 95% CI for the OR of health_sourceReliable ranges from 0.873 to 2.049. Since the CI includes 1, this means the effect is not statistically significant at the 0.05 level. There is not enough evidence to conclude that having a reliable source of health information is associated with a significant increase in the odds of having correct blood pressure knowledge.
 ## In summary: Individuals with reliable sources of health information may have better odds of knowing correct blood pressure values (OR = 1.331), but this relationship is not statistically significant due to the confidence interval including 1.
 
+```{r}
+# Creating the table from model1_results
+table_with_footnote1 <- tableGrob(model1_results)
+
+# Creating the footnote text
+footnote <- "Predictor variable: Health Information Source"
+
+# Combining the table and footnote
+table_with_footnote1 <- arrangeGrob(
+  table_with_footnote1,
+  bottom = textGrob(footnote, gp = gpar(fontsize = 10, fontface = "italic"), hjust = 0)
+)
+
+# Save the table as an image (PNG)
+ggsave("model1_results_with_footnote.png", table_with_footnote1, width = 8, height = 6)
+
+# display it in RStudio as well
+grid.draw(table_with_footnote1)
+
+```
+
 
 ```{r}
 # Second model: Logistic regression with the independent and dependent variable + demographics
@@ -462,13 +483,36 @@ print(model2_results)
 
 ```
 ```{r}
+# Creating the table from model2_results
+table_with_footnote <- tableGrob(model2_results)
+
+# Creating the footnote text
+footnote <- "Adjusted for age, sex, and race."
+
+# Combining the table and footnote
+table_with_footnote <- arrangeGrob(
+  table_with_footnote,
+  bottom = textGrob(footnote, gp = gpar(fontsize = 10, fontface = "italic"), hjust = 0)
+)
+
+# Saving the table as an image (PNG)
+ggsave("model2_results_with_footnote.png", table_with_footnote, width = 8, height = 6)
+
+# Displaying it 
+grid.draw(table_with_footnote)
+
+```
+
+
+
+```{r}
 # Export table to a CSV file
 write.csv(model2_results, "model2_results.csv", row.names = FALSE)
 
 ```
 
 ```{r}
-# Run the VIF function on your logistic regression model (model2) to check for Multicollinearity 
+# Running the VIF function on your logistic regression model (model2) to check for Multicollinearity 
 vif(model2)
 ```
 ## Interpretation: The GVIF suggests that there is no significant multicollinearity in the model. The factors are not highly correlated with each other. 
@@ -504,6 +548,8 @@ print(lrt_results)
 # Export the results to a CSV file
 write.csv(lrt_results, "lrt_results.csv", row.names = FALSE)
 
+## Interpretation : this suggests that the additional predictors in Model 2 significantly improve the model's explanatory power.
+
 ```
 ```{r}
 # Creating a data frame for the coefficients and confidence intervals from Model 1
@@ -521,4 +567,131 @@ print(model1_results)
 write.csv(model1_results, "model1_results.csv", row.names = FALSE)
 
 ```
+## Checking cook's distance 
+```{r}
+
+
+# Calculating Cook's distance
+cooks_d <- cooks.distance(model2)
+
+# View Cook's distances
+print(cooks_d)
+
+# Identifying influential points
+influential_points <- which(cooks_d > (4 / nrow(Htn_cleaned)))  # Common threshold
+print(influential_points)
+
+# Visualizing Cook's distances 
+plot(cooks_d, main = "Cook's Distance for Model2", ylab = "Cook's Distance", type = "h")
+abline(h = 4 / nrow(Htn_cleaned), col = "red", lty = 2)  # Adding threshold line
+
+```
+
+```{r}
+# Saving the plot as a PNG image
+png("Cooks_Distance_Plot.png", width = 800, height = 600)
+
+# Generating the Cook's Distance plot
+plot(cooks_d, main = "Cook's Distance for Model2", ylab = "Cook's Distance", type = "h")
+abline(h = 4 / nrow(Htn_cleaned), col = "red", lty = 2)  # Adding threshold line
+
+# Close the PNG device (saving the plot)
+dev.off()
+
+
+```
+
+
+
+```{r}
+# Calculate Cook's Distance
+cooksd <- cooks.distance(model2)
+
+# Define the threshold (4 / number of observations, or a custom threshold)
+threshold <- 4 / nrow(Htn_cleaned)
+
+# Identify indices of influential points
+influential_points <- which(cooksd > threshold)
+
+# Extract the data corresponding to influential points
+influential_data <- Htn_cleaned[influential_points, ]
+
+# Add Cook's Distance values to the table
+influential_data$Cooks_Distance <- cooksd[influential_points]
+
+# Load the library for exporting tables
+library(knitr)
+
+# Display the table in RStudio
+kable(influential_data, caption = "Influential Points with Cook's Distance")
+
+# Save the table as a CSV for external use
+write.csv(influential_data, "influential_points.csv", row.names = FALSE)
+
+```
+
+## The goodness of fit; the Hosmer Lemeshow test
+```{r}
+blr_test_hosmer_lemeshow(model2)
+# Interpretation: model appears to have a good fit to the data based on the Hosmer-Lemeshow test
+
+```
+```{r}
+# Install required packages
+install.packages("gridExtra")
+install.packages("grid")
+install.packages("magick") # For exporting as an image
+
+# Load libraries
+library(gridExtra)
+library(grid)
+library(magick)
+
+# Create the partition table as a data frame
+partition_table <- data.frame(
+  Group = 1:10,
+  Total = c(62, 47, 52, 72, 53, 34, 69, 40, 81, 22),
+  Observed_1 = c(11, 5, 5, 12, 10, 9, 19, 10, 27, 8),
+  Expected_1 = c(6.67, 6.61, 8.35, 13.99, 11.23, 7.31, 17.50, 10.80, 26.23, 7.30),
+  Observed_0 = c(51, 42, 47, 60, 43, 25, 50, 30, 54, 14),
+  Expected_0 = c(55.33, 40.39, 43.65, 58.01, 41.77, 26.69, 51.50, 29.20, 54.77, 14.70)
+)
+
+# Create the goodness-of-fit table as a data frame
+gof_table <- data.frame(
+  Metric = c("Chi-Square", "DF", "Pr > ChiSq"),
+  Value = c(6.6014, 8, 0.5802)
+)
+
+# Convert both tables to grid tables
+partition_grob <- tableGrob(partition_table, rows = NULL)
+gof_grob <- tableGrob(gof_table, rows = NULL)
+
+# Add titles to the tables
+partition_title <- textGrob("Partition for the Hosmer & Lemeshow Test", gp = gpar(fontsize = 14, fontface = "bold"))
+gof_title <- textGrob("Goodness of Fit Test", gp = gpar(fontsize = 14, fontface = "bold"))
+
+# Combine the tables into one layout
+combined_table <- grid.arrange(
+  partition_title, partition_grob,
+  gof_title, gof_grob,
+  ncol = 1,
+  heights = c(0.5, 3, 0.5, 1.5)
+)
+
+# Export the combined table as an image
+png("combined_table.png", width = 1200, height = 800)
+grid.draw(combined_table)
+dev.off()
+
+```
+
+
+
+
+
+```{r}
+write_xlsx(Htn_cleaned, "Htn_Clean.xlsx")
+```
+
 
